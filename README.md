@@ -17,8 +17,8 @@ This is not a generic Sentinel setup lab. Every phase is built around evidence, 
 | Phase | Focus | Status |
 |---|---|---|
 | **01** | Architecture, telemetry pipeline & baseline | `Completed` |
-| **02** | Controlled identity privilege sequence | `Next` |
-| **03** | KQL investigation & timeline reconstruction | `Planned` |
+| **02** | Controlled identity privilege sequence | `Completed` |
+| **03** | KQL investigation & timeline reconstruction | `Next` |
 | **04** | Sentinel detection engineering | `Planned` |
 | **05** | Cleanup, exact replay & validation | `Planned` |
 
@@ -26,29 +26,29 @@ This is not a generic Sentinel setup lab. Every phase is built around evidence, 
 
 ## 60 Second Project Summary
 
-Phase 01 established the evidence pipeline before any suspicious activity was introduced. A controlled Entra identity was created, its activity was verified in native Entra audit telemetry, and the same class of `UserManagement` activity was then recovered inside Microsoft Sentinel through KQL.
+Phase 01 established the evidence pipeline before any security relevant activity was introduced. A controlled Entra identity was created, its activity was verified in native Entra audit telemetry, and the same class of `UserManagement` activity was then recovered inside Microsoft Sentinel through KQL.
 
-The working path is:
+Phase 02 then introduced the first controlled identity sequence. `case-user` received the built in `User Administrator` role and later used that privilege to create `case-secondary`. Both events reached Sentinel and were reconstructed into one chronological KQL view.
+
+The current evidence chain is:
 
 ```text
-Microsoft Entra ID
+case-user
         ↓
-Entra AuditLogs
+User Administrator assigned
         ↓
-Diagnostic Settings
+RoleManagement telemetry
         ↓
-Log Analytics Workspace
+case-user creates case-secondary
         ↓
-Microsoft Sentinel
+UserManagement telemetry
         ↓
-KQL Investigation
+KQL correlation timeline
 ```
 
-A controlled `Update user` event was successfully recovered from the Sentinel `AuditLogs` table with `Result: success` and `Category: UserManagement`. That confirmed the telemetry path was working end to end before the privilege related scenario begins.
+This establishes the behaviour pattern that later phases will investigate and convert into detection logic.
 
-A baseline query then summarized the audit activity already present across the tenant. The baseline is intentionally small. It is not presented as an enterprise behavioural model. Its purpose is to establish what activity existed before Phase 02 introduces the controlled identity sequence.
-
-**Phase 01 establishes visibility only. No compromise or malicious identity activity is claimed.**
+**No compromise is claimed. Every action was controlled and intentionally generated inside the lab.**
 
 ---
 
@@ -94,11 +94,11 @@ No Azure VM, premium Defender plan, or unrelated cloud service was added simply 
 
 ## Source Telemetry Validation
 
-The first evidence point came directly from Microsoft Entra ID. Creating the controlled identity produced an `Add user` event in the native audit log.
+Creating the controlled identity produced an `Add user` event in the native Entra audit log.
 
 ![Entra Add User audit event](images/phase1_01_entra_add_user_audit.png)
 
-This proved that Entra was recording the identity management activity before Sentinel entered the evidence chain.
+This proved that Entra was recording identity management activity before Sentinel entered the evidence chain.
 
 ## Log Analytics Workspace
 
@@ -108,11 +108,9 @@ A dedicated Log Analytics workspace was deployed in the `rg-azure-identity-lab` 
 
 ## Sentinel Enablement
 
-Microsoft Sentinel was then enabled on the same workspace.
+Microsoft Sentinel was enabled on the same workspace.
 
 ![Microsoft Sentinel enabled](images/phase1_03_sentinel_enabled.png)
-
-The important point is not the portal confirmation itself. It establishes where the later KQL investigation and analytic detection will operate.
 
 ## Audit Log Forwarding
 
@@ -120,7 +118,7 @@ Entra `AuditLogs` were configured to flow into `law-azure-identity-lab` through 
 
 ![Entra AuditLogs diagnostic setting](images/phase1_04_entra_auditlogs_diagnostic_setting.png)
 
-At this stage only `AuditLogs` were required. `SigninLogs` were deliberately left out because they were not necessary for the core Phase 01 validation and the project is being kept within the capabilities already available to the tenant.
+At this stage only `AuditLogs` were required. `SigninLogs` were deliberately left out because they were not necessary for the core validation and the project is being kept within the capabilities already available to the tenant.
 
 ## Sentinel KQL Validation
 
@@ -133,33 +131,15 @@ AuditLogs
 | order by TimeGenerated desc
 ```
 
-The query returned the controlled event as:
-
-```text
-OperationName: Update user
-Result: success
-Category: UserManagement
-```
+The query returned the controlled event as `Update user`, with `Result: success` and `Category: UserManagement`.
 
 ![Sentinel UserManagement KQL result](images/phase1_05_sentinel_usermanagement_kql.png)
 
-This is the strongest Phase 01 evidence because it proves the complete path:
-
-```text
-Controlled identity change
-        ↓
-Entra AuditLogs
-        ↓
-Log Analytics ingestion
-        ↓
-Sentinel AuditLogs table
-        ↓
-KQL result
-```
+This confirmed the complete path from controlled identity change to Entra telemetry, Log Analytics ingestion, Sentinel, and KQL.
 
 ## Baseline
 
-Before Phase 02 begins, the available audit activity was summarized with:
+Before Phase 02 began, the available audit activity was summarized with:
 
 ```kql
 AuditLogs
@@ -169,13 +149,13 @@ AuditLogs
 
 The baseline showed activity across `ApplicationManagement`, `Authentication`, `PolicyManagement`, `Authorization`, and `UserManagement`.
 
-This baseline is not presented as statistically mature enterprise behaviour. It is a controlled reference point showing what was present before the privilege related sequence is introduced.
+This baseline is not presented as statistically mature enterprise behaviour. It is a controlled reference point showing what was present before the privilege related sequence was introduced.
 
 ## Phase 01 Conclusion
 
 The evidence proves that Entra generates identity management telemetry, that `AuditLogs` reach the Log Analytics workspace used by Sentinel, and that KQL can retrieve and summarize `UserManagement` events.
 
-It does **not** prove unauthorized access, account compromise, malicious privilege escalation, or successful detection engineering. None of those events have occurred yet.
+It does not prove unauthorized access, account compromise, malicious privilege escalation, or successful detection engineering.
 
 Phase 01 therefore closes with a known good telemetry path rather than an assumed one.
 
@@ -183,40 +163,103 @@ Phase 01 therefore closes with a known good telemetry path rather than an assume
 
 # Phase 02: Controlled Identity Sequence
 
-**Status: Next**
+## Objective
 
-The next phase will introduce one controlled privilege related sequence. The working detection hypothesis is:
+Phase 02 introduced the first security relevant identity sequence. `case-user` started as a normal identity, received the built in `User Administrator` role, and then used that privilege to create a second identity named `case-secondary`.
+
+The working hypothesis was:
 
 > **A newly elevated identity performs sensitive identity management activity shortly afterward.**
 
-The preferred flow is:
+This is a controlled detection scenario, not evidence of compromise.
 
-```text
-normal identity
-      ↓
-new administrative privilege
-      ↓
-sensitive identity management action
-      ↓
-correlate the sequence
+## Privilege Assignment
+
+Entra recorded the role change as a successful `RoleManagement` event. The modified properties identified the assigned role as `User Administrator`.
+
+![User Administrator role assignment](images/phase2_01_user_administrator_role_assignment.png)
+
+The same event was then recovered in Sentinel from the `AuditLogs` table.
+
+![Sentinel role assignment KQL](images/phase2_02_sentinel_role_assignment_kql.png)
+
+This confirmed that the privilege change was present in both the native Entra audit view and the Sentinel investigation layer.
+
+## Sensitive Identity Action
+
+After receiving the role, `case-user` signed in separately and created `case-secondary`.
+
+A KQL query extracted the actor and target while removing the tenant domain from the displayed values.
+
+```kql
+AuditLogs
+| where OperationName == "Add user"
+| extend ActorUPN = tostring(InitiatedBy.user.userPrincipalName)
+| extend TargetUPN = tostring(TargetResources[0].userPrincipalName)
+| extend Actor = tostring(split(ActorUPN, "@")[0])
+| extend Target = tostring(split(TargetUPN, "@")[0])
+| project TimeGenerated, Actor, OperationName, Target, Result, Category
+| order by TimeGenerated desc
 ```
 
-The exact privilege and follow on action will only be locked once their telemetry has been verified in this tenant. This remains a controlled security scenario and is not presented as compromise.
+The result showed `case-user` as the actor, `Add user` as the operation, `case-secondary` as the target, and `success` as the result.
+
+![case-user creates case-secondary](images/phase2_03_case_user_creates_secondary_kql.png)
+
+## Sequence Correlation
+
+The final Phase 02 query brought the privilege assignment and the user creation into one chronological view.
+
+![Privilege to identity action timeline](images/phase2_04_privilege_to_identity_action_timeline.png)
+
+The sequence reconstructed as:
+
+```text
+Privilege assigned
+case-user
+User Administrator
+success
+
+Sensitive identity action
+case-user
+Created case-secondary
+success
+```
+
+This is the main result of Phase 02. It proves that the same identity received an administrative role and later performed a sensitive identity management action.
+
+The full hunt query is preserved in:
+
+[`detections/identity-activity-hunt.kql`](detections/identity-activity-hunt.kql)
+
+[Read the full Phase 02 case notes](docs/phase-02-controlled-identity-sequence.md)
+
+## Phase 02 Conclusion
+
+The evidence proves that `case-user` received the `User Administrator` role, that the role assignment reached Sentinel, and that the same identity later created `case-secondary` successfully.
+
+The evidence does not prove malicious intent, unauthorized privilege escalation, persistence, or account compromise. The value of the sequence is behavioural. In a real environment, this pattern would be worth analyst review because a newly elevated identity performed sensitive identity management activity shortly afterward.
+
+Phase 02 therefore closes with a validated event chain ready for deeper investigation in Phase 03.
 
 ---
 
-## Planned Detection Artifacts
+# Phase 03: KQL Investigation & Timeline Reconstruction
+
+**Status: Next**
+
+Phase 03 will investigate the Phase 02 sequence in more depth. The goal is to move beyond simply proving that two events occurred and instead determine which fields, relationships, time windows, and false positive considerations matter if this behaviour is going to become a reliable Sentinel detection.
+
+---
+
+## Planned Technical Artifacts
 
 ```text
 detections/
 ├── baseline-identity-activity.kql
 ├── identity-activity-hunt.kql
 └── privilege-followed-by-sensitive-action.kql
-```
 
-A controlled replay script may also be added later:
-
-```text
 scripts/
 └── controlled-identity-replay.ps1
 ```
@@ -238,8 +281,6 @@ ANALYST INFERENCE
       ↓
 DEFENSIBLE CONCLUSION
 ```
-
-The project will use language such as `the evidence supports`, `telemetry confirms`, `worth analyst review`, and `successful compromise was not established` where appropriate.
 
 Administrative activity is never treated as malicious automatically.
 
