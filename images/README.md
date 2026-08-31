@@ -21,4 +21,11 @@ phase2_03_case_user_creates_secondary_kql.png
 phase2_04_privilege_to_identity_action_timeline.png
 ```
 
+## Phase 03
+
+```text
+phase3_01_identity_activity_triage.png
+phase3_02_timeline_reconstruction.png
+```
+
 The project keeps only images that add evidentiary value. Images are reviewed for credentials, tokens, private account information, and unnecessary identifiers before the repository becomes public.
