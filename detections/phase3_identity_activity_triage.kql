@@ -1,0 +1,40 @@
+// Phase 03: Identity activity triage
+// Purpose: Separate the two security relevant events from expected setup activity
+// DisplayActor is a presentation alias. It does not modify the stored event data.
+
+AuditLogs
+| where TimeGenerated between (
+    datetime(2026-08-31 04:32:00) ..
+    datetime(2026-08-31 05:10:00)
+)
+| extend ActorUPN = tostring(InitiatedBy.user.userPrincipalName)
+| extend Actor = tostring(split(ActorUPN, "@")[0])
+| mv-expand TR = TargetResources
+| extend TargetUPN = tostring(TR.userPrincipalName)
+| extend Target = tostring(split(TargetUPN, "@")[0])
+| where Actor == "case-user"
+    or Target == "case-user"
+    or Target == "case-secondary"
+| extend Classification = case(
+    OperationName == "Add member to role", "Primary finding",
+    OperationName == "Add user" and Actor == "case-user" and Target == "case-secondary", "Primary finding",
+    OperationName in (
+        "Update user",
+        "Update PasswordProfile",
+        "Reset password (by admin)",
+        "Change user password",
+        "Change password (self-service)",
+        "User registered security info",
+        "User registered all required security info",
+        "Validate Password"
+    ), "Setup context",
+    "Other context"
+)
+| extend DisplayActor = case(
+    Actor == "case-user", "case-user",
+    isempty(Actor), "system",
+    "lab-admin"
+)
+| extend SortOrder = iif(Classification == "Primary finding", 0, 1)
+| order by SortOrder asc, TimeGenerated asc
+| project TimeGenerated, Classification, OperationName, Actor=DisplayActor, Target, Result
