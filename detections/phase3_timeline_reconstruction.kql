@@ -1,0 +1,42 @@
+// Phase 03: Timeline reconstruction
+// Purpose: Reconstruct the privilege assignment and follow-on identity action
+// and calculate the elapsed time between the two events.
+
+union
+(
+    AuditLogs
+    | where OperationName == "Add member to role"
+    | mv-expand TR = TargetResources
+    | extend SubjectUPN = tostring(TR.userPrincipalName)
+    | extend Subject = tostring(split(SubjectUPN, "@")[0])
+    | mv-expand P = TR.modifiedProperties
+    | where tostring(P.displayName) == "Role.DisplayName"
+    | extend Role = trim(@'"', tostring(P.newValue))
+    | where Subject == "case-user"
+    | where Role == "User Administrator"
+    | project
+        TimeGenerated,
+        Stage = "Privilege assigned",
+        Subject,
+        Detail = strcat("Assigned ", Role),
+        Result
+),
+(
+    AuditLogs
+    | where OperationName == "Add user"
+    | extend ActorUPN = tostring(InitiatedBy.user.userPrincipalName)
+    | extend TargetUPN = tostring(TargetResources[0].userPrincipalName)
+    | extend Actor = tostring(split(ActorUPN, "@")[0])
+    | extend Target = tostring(split(TargetUPN, "@")[0])
+    | where Actor == "case-user"
+    | where Target == "case-secondary"
+    | project
+        TimeGenerated,
+        Stage = "Sensitive identity action",
+        Subject = Actor,
+        Detail = strcat("Created ", Target),
+        Result
+)
+| order by TimeGenerated asc
+| serialize
+| extend TimeSincePrevious = TimeGenerated - prev(TimeGenerated)
