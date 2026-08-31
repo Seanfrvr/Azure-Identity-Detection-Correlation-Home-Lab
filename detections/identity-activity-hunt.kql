@@ -1,0 +1,32 @@
+union
+(
+    AuditLogs
+    | where OperationName == "Add member to role"
+    | mv-expand TR = TargetResources
+    | extend IdentityUPN = tostring(TR.userPrincipalName)
+    | mv-expand P = TR.modifiedProperties
+    | where tostring(P.displayName) == "Role.DisplayName"
+    | extend Identity = tostring(split(IdentityUPN, "@")[0])
+    | extend Detail = trim(@'"', tostring(P.newValue))
+    | where Identity == "case-user"
+    | project TimeGenerated,
+              Stage = "Privilege assigned",
+              Identity,
+              Detail,
+              Result
+),
+(
+    AuditLogs
+    | where OperationName == "Add user"
+    | extend ActorUPN = tostring(InitiatedBy.user.userPrincipalName)
+    | extend TargetUPN = tostring(TargetResources[0].userPrincipalName)
+    | extend Identity = tostring(split(ActorUPN, "@")[0])
+    | extend Target = tostring(split(TargetUPN, "@")[0])
+    | where Identity == "case-user" and Target == "case-secondary"
+    | project TimeGenerated,
+              Stage = "Sensitive identity action",
+              Identity,
+              Detail = strcat("Created ", Target),
+              Result
+)
+| order by TimeGenerated asc
