@@ -1,0 +1,50 @@
+// Phase 04: Scheduled correlation detection
+// Detects a successful User Administrator assignment followed by the same identity
+// creating another Entra user within 60 minutes.
+//
+// The rule is intentionally generic. No lab identity names are hardcoded.
+// The Add user side is limited by ingestion time so a 5 minute scheduled rule does
+// not repeatedly alert on the same historical action throughout the 65 minute lookback.
+
+AuditLogs
+| where TimeGenerated >= ago(65m)
+| where OperationName == "Add member to role"
+| where Result =~ "success"
+| mv-expand TR = TargetResources
+| extend IdentityUPN = tostring(TR.userPrincipalName)
+| where isnotempty(IdentityUPN)
+| mv-expand P = TR.modifiedProperties
+| where tostring(P.displayName) == "Role.DisplayName"
+| extend Role = trim(@'"', tostring(P.newValue))
+| where Role == "User Administrator"
+| project
+    ElevatedTime = TimeGenerated,
+    IdentityUPN,
+    Role
+| join kind=inner (
+    AuditLogs
+    | where TimeGenerated >= ago(65m)
+    | where ingestion_time() >= ago(5m)
+    | where OperationName == "Add user"
+    | where Result =~ "success"
+    | extend IdentityUPN = tostring(InitiatedBy.user.userPrincipalName)
+    | extend CreatedUPN = tostring(TargetResources[0].userPrincipalName)
+    | where isnotempty(IdentityUPN)
+    | project
+        ActionTime = TimeGenerated,
+        IdentityUPN,
+        CreatedUPN
+) on IdentityUPN
+| where ActionTime between (ElevatedTime .. ElevatedTime + 60m)
+| extend IdentityName = tostring(split(IdentityUPN, "@")[0])
+| extend IdentityUPNSuffix = tostring(split(IdentityUPN, "@")[1])
+| extend CreatedUser = tostring(split(CreatedUPN, "@")[0])
+| extend TimeToAction = ActionTime - ElevatedTime
+| project
+    TimeGenerated = ActionTime,
+    ElevatedTime,
+    IdentityName,
+    IdentityUPNSuffix,
+    Role,
+    CreatedUser,
+    TimeToAction
