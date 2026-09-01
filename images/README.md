@@ -28,4 +28,12 @@ phase3_01_identity_activity_triage.png
 phase3_02_timeline_reconstruction.png
 ```
 
+## Phase 04
+
+```text
+phase4_01_historical_detection_validation.png
+phase4_02_sentinel_rule_api_deployment.png
+phase4_03_deployed_rule_configuration.png
+```
+
 The project keeps only images that add evidentiary value. Images are reviewed for credentials, tokens, private account information, and unnecessary identifiers before the repository becomes public.
