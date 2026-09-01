@@ -36,4 +36,16 @@ phase4_02_sentinel_rule_api_deployment.png
 phase4_03_deployed_rule_configuration.png
 ```
 
+## Phase 05
+
+```text
+phase5_01_validation_replay_case_validation.png
+phase5_02_initial_duplicate_security_alerts.png
+phase5_03_initial_duplicate_incidents.png
+phase5_04_tuned_rule_redeployment.png
+phase5_05_final_retest_case_retest.png
+phase5_06_single_alert_after_tuning.png
+phase5_07_single_incident_after_tuning.png
+```
+
 The project keeps only images that add evidentiary value. Images are reviewed for credentials, tokens, private account information, and unnecessary identifiers before the repository becomes public.
