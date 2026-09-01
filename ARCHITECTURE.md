@@ -1,10 +1,12 @@
-# Architecture — Azure Identity Detection & Correlation Lab
+# Architecture: Azure Identity Detection & Correlation Lab
 
 ## Design Goal
 
-Build the smallest Azure-native architecture capable of supporting a defensible identity investigation and a correlated Sentinel detection.
+This lab was designed to prove an end to end Azure identity detection workflow with the smallest practical cloud footprint.
 
-The design intentionally avoids unnecessary infrastructure.
+The architecture had to support five things clearly: generation of identity activity, collection of Entra audit telemetry, investigation with KQL, conversion of a behavioural relationship into a Sentinel analytic rule, and fresh replay validation after deployment.
+
+The final environment remained intentionally small because extra infrastructure would not have improved the identity evidence chain.
 
 ```text
 Microsoft Entra ID
@@ -21,317 +23,204 @@ KQL Investigation
         ↓
 Correlation Detection
         ↓
-Alert / Incident
+Scheduled Analytic Rule
         ↓
-Cleanup / Replay / Validation
+SecurityAlert
+        ↓
+SecurityIncident
+        ↓
+Tuning and Controlled Retest
 ```
 
----
-
-## Logical Architecture
+## Final Logical Architecture
 
 ```mermaid
 flowchart TD
-    U["Controlled Lab Identity"] --> E["Microsoft Entra ID"]
+    U["Controlled Lab Identities"] --> E["Microsoft Entra ID"]
     E --> A["Entra AuditLogs"]
     A --> D["Diagnostic Settings"]
     D --> L["Log Analytics Workspace\nlaw-azure-identity-lab"]
     L --> S["Microsoft Sentinel"]
-    S --> H["KQL Hunting"]
-    H --> C["Event Correlation"]
+    S --> H["KQL Investigation"]
+    H --> C["Behavioural Correlation"]
     C --> R["Scheduled Analytic Rule"]
-    R --> I["Sentinel Alert / Incident"]
-    I --> X["Cleanup / Remediation"]
-    X --> P["Controlled Replay"]
+    R --> SA["SecurityAlert"]
+    SA --> SI["SecurityIncident"]
+    SI --> T["Detection Tuning"]
+    T --> P["Controlled Replay"]
     P --> A
 ```
 
----
+The important point is that Sentinel was not used only as a query interface. The project progressed from telemetry collection into investigation, rule deployment, alert generation, incident creation, tuning, and validation against fresh activity.
 
-## Resource Layout
+## Azure Resource Layout
 
-### Azure subscription
+| Component | Value | Purpose |
+|---|---|---|
+| Resource group | `rg-azure-identity-lab` | Logical boundary for the project resources |
+| Log Analytics workspace | `law-azure-identity-lab` | Stores Entra audit telemetry and hosts Sentinel |
+| Region | South Africa North | Azure deployment region for the workspace |
+| Identity source | Microsoft Entra ID | Generates the identity management events used in the investigation |
+| Primary table | `AuditLogs` | Source table for privilege and user management activity |
+| SIEM | Microsoft Sentinel | Investigation, detection, alert, and incident layer |
 
-A dedicated Azure lab subscription is used for this project.
+Subscription IDs, tenant IDs, credentials, and private tenant details are intentionally excluded because they are not required to understand or reproduce the architecture.
 
-Subscription and tenant identifiers are intentionally omitted from public documentation.
+## Identity Model
 
-### Resource group
-
-```text
-rg-azure-identity-lab
-```
-
-Purpose:
-- logical grouping for the project resources
-- easier cleanup
-- clear separation from unrelated Azure work
-
-### Log Analytics workspace
+The investigation used controlled lab identities rather than real personal identities.
 
 ```text
-law-azure-identity-lab
-```
-
-Region:
-
-```text
-South Africa North
-```
-
-Purpose:
-- receive Entra audit telemetry
-- store/query logs
-- act as the Sentinel workspace
-
-### Microsoft Sentinel
-
-Sentinel is enabled directly on the Log Analytics workspace.
-
-Purpose:
-- KQL investigation
-- hunting
-- analytic rule creation
-- alert/incident validation
-
-### Microsoft Entra ID
-
-Current licence:
-
-```text
-Microsoft Entra ID Free
-```
-
-Primary telemetry source:
-
-```text
-AuditLogs
-```
-
-A dedicated controlled identity is used for lab activity:
-
-```text
+lab-admin
+    ↓
+assigns User Administrator
+    ↓
 case-user
+    ↓
+creates another controlled identity
 ```
 
-No real personal identity is required for the investigation narrative.
+The primary investigation sequence used `case-secondary`. Live validation later used `case-validation` and `case-retest` so the deployed detection could be tested against activity generated after the rule already existed.
 
----
+The project never treats these administrative actions as automatically malicious. Their security value comes from the behavioural relationship between privilege assignment, actor identity, sensitive follow on activity, and time.
 
 ## Telemetry Path
 
-### Source
+Microsoft Entra ID generated the source events. Diagnostic Settings forwarded `AuditLogs` into the dedicated Log Analytics workspace. Sentinel then queried the same data directly from the workspace.
 
-Microsoft Entra ID generates identity-management audit records.
-
-Examples observed during Phase 01:
+The telemetry pipeline was proven before the main scenario was introduced.
 
 ```text
-Add user
-Update user
-Add service principal
-```
-
-### Forwarding
-
-Entra Diagnostic Settings forward selected audit telemetry to:
-
-```text
-law-azure-identity-lab
-```
-
-Only the required log category is enabled initially:
-
-```text
-AuditLogs
-```
-
-This keeps the architecture small and avoids collecting unnecessary data.
-
-### Storage / Query Layer
-
-The events are available in Log Analytics / Sentinel through the table:
-
-```text
-AuditLogs
-```
-
-### Investigation Layer
-
-KQL is used to:
-
-- retrieve identity events
-- filter by category and operation
-- reconstruct event sequences
-- summarize baseline activity
-- later correlate privilege changes with sensitive follow-on actions
-
----
-
-## Phase 01 Validation
-
-The architecture was not treated as complete until the telemetry path was proven end to end.
-
-Validation sequence:
-
-```text
-Controlled user update
+Controlled Entra action
         ↓
-Entra Audit Logs showed Update user
+Native Entra audit record
         ↓
-Event forwarded into Log Analytics
+Diagnostic Settings forwarding
         ↓
-Sentinel AuditLogs returned UserManagement event
+Log Analytics ingestion
         ↓
-KQL confirmed Result = success
+Sentinel AuditLogs query
+        ↓
+Result = success
 ```
 
-Query used:
+That early validation mattered because later correlation findings depended on knowing the data path was already working.
+
+## Investigation Architecture
+
+The investigation started broad rather than selecting only the two events that were already known.
+
+KQL was used to reconstruct surrounding activity involving `case-user`, including password changes, security registration, user updates, role assignment, and user creation. The investigation then separated setup context from the security relevant sequence.
+
+The final relationship was:
+
+```text
+User Administrator assigned to case-user
+        ↓
+36 minutes 11 seconds
+        ↓
+case-user creates case-secondary
+```
+
+That relationship became the detection hypothesis.
+
+## Detection Architecture
+
+The final analytic does not hardcode `case-user`, `case-secondary`, `case-validation`, or `case-retest`.
+
+Instead, it searches for a successful `User Administrator` assignment and joins that event with a successful `Add user` action initiated by the same identity within a 60 minute correlation window.
+
+The scheduled rule uses:
+
+| Setting | Value |
+|---|---|
+| Rule name | `Newly Elevated User Administrator Creates Cloud Identity` |
+| Severity | Medium |
+| Frequency | 5 minutes |
+| Lookback | 65 minutes |
+| Correlation window | 60 minutes |
+| Incident creation | Enabled |
+| ATT&CK tactics | Persistence, Privilege Escalation |
+| ATT&CK techniques | T1098, T1136 |
+
+The elevated identity is mapped as an Account entity, while the assigned role, created user, and elapsed time are preserved as useful alert context.
+
+## Deployment Architecture
+
+The Sentinel Analytics page in the Defender portal redirected back to the workspace list during the build. Rather than stopping there, the analytic rule was deployed through Azure Cloud Shell using the Microsoft SecurityInsights REST API.
+
+The deployment flow became:
+
+```text
+KQL detection file
+        ↓
+JSON rule definition
+        ↓
+Azure CLI authenticated session
+        ↓
+Microsoft SecurityInsights REST API
+        ↓
+Sentinel scheduled analytic rule
+```
+
+The deployment script resolves the active subscription from the authenticated Azure CLI session. It does not store a subscription ID, tenant ID, password, token, or client secret in the repository.
+
+## Validation and Tuning Architecture
+
+The first live replay proved that the deployed rule worked, but it also exposed a real engineering issue. The five minute schedule and 65 minute lookback allowed the same newly ingested `Add user` event to be matched during more than one overlapping rule execution.
+
+The first replay therefore produced two alerts and two incidents.
+
+The detection was then tuned so the role assignment remained available across the full context window while the sensitive `Add user` action became eligible in one ingestion slice only.
 
 ```kql
-AuditLogs
-| where Category == "UserManagement"
-| project TimeGenerated, OperationName, Result, Category
-| order by TimeGenerated desc
+| where ingestion_time() >= ago(10m)
+| where ingestion_time() < ago(5m)
 ```
 
-Observed result:
+A second fresh replay then produced:
 
 ```text
-OperationName: Update user
-Result: success
-Category: UserManagement
+1 fresh replay
+      ↓
+1 SecurityAlert
+      ↓
+1 SecurityIncident
 ```
 
-This proved the pipeline before the main scenario begins.
+This final retest proved that the architecture supported not only detection creation, but also measurement, failure analysis, tuning, and repeat validation.
 
----
+## Why No Local SIEM VM Was Needed
 
-## Baseline Model
+The project is intentionally Azure native.
 
-The baseline is deliberately small.
+A Kali, Ubuntu, or Windows VM would have made the diagram larger without improving the identity evidence chain. The required workflow was fully supported by Entra ID, Log Analytics, Sentinel, KQL, Azure Cloud Shell, and the Sentinel REST API.
 
-It is not described as an enterprise behavioural baseline.
+The core local requirement was therefore only a browser based workstation.
 
-It simply establishes which audit activity existed in the controlled tenant before the main privilege sequence is generated.
-
-Query:
-
-```kql
-AuditLogs
-| summarize Events=count() by Category, OperationName
-| order by Events desc
-```
-
-Observed categories included:
-
-```text
-ApplicationManagement
-Authentication
-PolicyManagement
-Authorization
-UserManagement
-```
-
-This reference point becomes useful when Phase 02 introduces new privilege-related identity activity.
-
----
-
-## Planned Investigation Path
-
-The exact role/action pair remains subject to telemetry validation, but the investigation model is:
-
-```text
-Normal identity
-      ↓
-Administrative privilege assigned
-      ↓
-Same identity performs sensitive identity action
-      ↓
-AuditLogs preserve both events
-      ↓
-KQL reconstructs sequence
-      ↓
-Sentinel correlates sequence
-      ↓
-Cleanup
-      ↓
-Repeat same controlled sequence
-      ↓
-Validate detection
-```
-
-The core detection hypothesis is:
-
-> **A newly elevated identity performs sensitive identity-management activity shortly afterward.**
-
-This sequence is security-relevant, but the project will not equate it automatically with compromise or malicious intent.
-
----
-
-## Why No Local SIEM VM?
-
-The project is intentionally Azure-native.
-
-Running Kali, Ubuntu, or Windows merely to make the topology larger would add complexity without improving the identity evidence chain.
-
-Current local requirement:
-
-```text
-MacBook + browser
-```
-
-Possible later addition:
-
-```text
-PowerShell / Microsoft Graph replay script
-```
-
-A local Windows VM is only justified if later phases genuinely require endpoint telemetry or Windows-specific behaviour.
-
----
+A local endpoint would only become justified if a later version of the lab introduced endpoint telemetry, PowerShell activity, device identity signals, or Windows specific behaviour.
 
 ## Cost Discipline
 
-The environment is designed to remain small:
+The environment was kept deliberately small.
 
-- one resource group
-- one Log Analytics workspace
-- one Sentinel workspace
-- low-volume Entra AuditLogs
-- no Azure VM
-- no premium Defender deployment
-- no unnecessary Logic Apps
-- no high-volume data connectors
+One resource group, one Log Analytics workspace, low volume Entra `AuditLogs`, and Sentinel were enough to complete the investigation and detection lifecycle. No Azure VM, high volume connector, unnecessary Logic App, or premium Defender deployment was added simply to make the project look larger.
 
-Resources are added only if they directly improve the evidence or detection story.
+The architecture follows a simple principle: add a component only when it improves the evidence, investigation, detection, or validation story.
 
----
+## Public Repository Boundary
 
-## Security / Public Repository Boundary
+The public documentation excludes credentials and sensitive tenant information that provide no analytical value.
 
-The architecture documentation intentionally excludes:
+The repository does not publish passwords, MFA secrets, authenticator QR codes, client secrets, access keys, SAS tokens, bearer tokens, connection strings, private keys, real personal email addresses, subscription IDs, or tenant IDs.
 
-```text
-subscription IDs
-tenant IDs
-object IDs
-correlation IDs
-real UPNs
-real tenant domain
-billing information
-credentials / secrets / tokens
-```
+Controlled lab identity names are retained where they are necessary to explain the investigation. Low risk operational identifiers may remain in evidence screenshots when they are part of the platform output and do not grant access or expose credentials.
 
-These identifiers are not required to understand the architecture.
+The screenshots used in the final repository were reviewed before publication, and the deployment artifacts were written so that sensitive Azure identifiers are resolved at runtime rather than stored in source control.
 
-The final repository will be sanitized and secret-scanned before publication.
+## Final Architecture Result
 
----
-
-## Architecture Success Condition
-
-The architecture is sufficient when it can support this full evidence chain:
+The completed architecture supports the full evidence chain originally required by the project:
 
 ```text
 IDENTITY ACTION
@@ -342,11 +231,17 @@ KQL INVESTIGATION
       ↓
 EVENT CORRELATION
       ↓
-SENTINEL DETECTION
+SENTINEL ANALYTIC RULE
       ↓
-REPLAY
+SECURITY ALERT
+      ↓
+SECURITY INCIDENT
+      ↓
+TUNING
+      ↓
+FRESH RETEST
       ↓
 VALIDATION
 ```
 
-If that chain is proven, additional infrastructure is unnecessary.
+The architecture is therefore complete. Additional infrastructure would only be justified by a new telemetry source or a new investigation objective, not by the need to make the project appear more complex.
