@@ -332,13 +332,7 @@ DEFENSIBLE CONCLUSION
 
 Administrative activity is never treated as malicious automatically.
 
-# Public Repository Safety
-
-The repository was built privately first so screenshots and artifacts could be reviewed before publication.
-
-Passwords, client secrets, access keys, SAS tokens, connection strings, bearer tokens, private keys, and real credentials are never published.
-
-Identifiers and account details are removed when they provide no analytical value. Lab identities are used throughout the investigation, and displayed KQL results are sanitized where appropriate.
+**Repository note:** Lab identities are used throughout, and credentials or sensitive tenant information are excluded from published artifacts.
 
 # Final Result
 
