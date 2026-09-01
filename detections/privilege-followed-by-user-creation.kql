@@ -1,10 +1,11 @@
-// Phase 04: Scheduled correlation detection
+// Final tuned scheduled correlation detection
 // Detects a successful User Administrator assignment followed by the same identity
 // creating another Entra user within 60 minutes.
 //
 // The rule is intentionally generic. No lab identity names are hardcoded.
-// The Add user side is limited by ingestion time so a 5 minute scheduled rule does
-// not repeatedly alert on the same historical action throughout the 65 minute lookback.
+// The role assignment can be found across the full 65 minute rule lookback.
+// The Add user action is restricted to one ingestion slice so overlapping scheduled
+// executions do not repeatedly alert on the same newly ingested action.
 
 AuditLogs
 | where TimeGenerated >= ago(65m)
@@ -24,7 +25,8 @@ AuditLogs
 | join kind=inner (
     AuditLogs
     | where TimeGenerated >= ago(65m)
-    | where ingestion_time() >= ago(5m)
+    | where ingestion_time() >= ago(10m)
+    | where ingestion_time() < ago(5m)
     | where OperationName == "Add user"
     | where Result =~ "success"
     | extend IdentityUPN = tostring(InitiatedBy.user.userPrincipalName)
