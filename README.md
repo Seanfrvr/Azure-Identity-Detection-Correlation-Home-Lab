@@ -58,8 +58,6 @@ second fresh replay
 1 alert → 1 incident
 ```
 
-No compromise is claimed. Every action was intentionally generated inside the lab.
-
 ## Architecture
 
 ```mermaid
